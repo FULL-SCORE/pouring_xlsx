@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import formidable, { Fields, Files } from 'formidable';
+import formidable from 'formidable';
 import { parse } from 'papaparse';
 import type { IncomingMessage } from 'http';
 
-// Supabase & Stripe client
-import { createClient } from '@supabase/supabase-js';
-import Stripe from 'stripe';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-07-30.basil",
-});
+interface RowData {
+  vid?: string;
+  title?: string;
+  price?: number | string;
+}
 
 export const config = {
   api: {
@@ -22,9 +15,10 @@ export const config = {
   },
 };
 
-function parseForm(req: NextRequest): Promise<{ fields: Fields; files: Files }> {
-  return new Promise((resolve, reject) => {
-    const form = formidable({ multiples: false });
+async function parseForm(req: NextRequest) {
+  const form = formidable({ multiples: false });
+
+  return new Promise<{ fields: formidable.Fields; files: formidable.Files }>((resolve, reject) => {
     form.parse(req as unknown as IncomingMessage, (err, fields, files) => {
       if (err) reject(err);
       else resolve({ fields, files });
@@ -32,109 +26,43 @@ function parseForm(req: NextRequest): Promise<{ fields: Fields; files: Files }> 
   });
 }
 
-interface Item {
-  vid: string;
-  title: string;
-  price: number;
-}
-
-async function updateSupabase(items: Item[]) {
-  console.log('🔥 Supabase 処理中...');
-  for (const item of items) {
-    console.log(`➡️ Upserting Supabase: ${item.vid} - ${item.title}`);
-    const { error } = await supabase.from('video_info').upsert(item);
-    if (error) {
-      console.error('❌ Supabaseエラー:', error);
-    }
-  }
-  console.log('✅ Supabase 完了');
-}
-
-async function updateStripe(items: Item[]) {
-  console.log('⚙️ Stripe 処理中...');
-  for (const item of items) {
-    console.log(`➡️ Stripe product 検索中: ${item.vid}`);
-    const products = await stripe.products.list({ limit: 100 });
-    const foundProduct = products.data.find(
-      (p) => p.metadata?.vid === item.vid
-    );
-
-    if (foundProduct) {
-      console.log(`🔄 既存商品更新: ${foundProduct.id}`);
-      await stripe.products.update(foundProduct.id, {
-        name: item.title,
-        metadata: {
-          vid: item.vid,
-        },
-      });
-    } else {
-      console.log(`➕ 新規商品作成: ${item.vid}`);
-      await stripe.products.create({
-        name: item.title,
-        metadata: {
-          vid: item.vid,
-        },
-      });
-    }
-  }
-  console.log('✅ Stripe 完了');
-}
-
 export async function POST(req: NextRequest) {
   try {
-    console.log('📦 アップロード開始');
-    const formData = await req.formData();
-    const mode = formData.get('mode');
-    const file = formData.get('file') as File;
+    const { fields, files } = await parseForm(req);
+    const updateTarget = fields.updateTarget?.[0] ?? 'both';
+    const file = files.file?.[0];
 
-    if (!file) {
-      console.error('❌ ファイルが見つかりません');
+    if (!file || !file.filepath) {
       return NextResponse.json({ error: 'ファイルが見つかりません' }, { status: 400 });
     }
 
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const fs = await import('fs/promises');
+    const buffer = await fs.readFile(file.filepath);
+
     const xlsx = await import('xlsx');
     const wb = xlsx.read(buffer);
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
+    const sheet = wb.Sheets[wb.SheetNames[0]];
     const csv = xlsx.utils.sheet_to_csv(sheet);
 
     const parsed = parse(csv, { header: true });
-    console.log('📝 CSVパース完了');
 
-    if (!parsed.data || !Array.isArray(parsed.data)) {
-      console.error('❌ データパースに失敗');
-      return NextResponse.json({ error: 'データパースに失敗しました' }, { status: 400 });
-    }
+    const items = (parsed.data as RowData[])
+  .map((row) => ({
+    vid: String(row.vid ?? ''),
+    title: String(row.title ?? ''),
+    price: Number(row.price ?? 0),
+  }))
+      .filter((item) => item.vid && item.title);
 
-    const items: Item[] = [];
-    for (const row of parsed.data) {
-      if (typeof row !== 'object' || row === null) continue;
-      items.push({
-        vid: String((row as Record<string, unknown>)['vid'] ?? ''),
-        title: String((row as Record<string, unknown>)['title'] ?? ''),
-        price: Number((row as Record<string, unknown>)['price'] ?? 0),
-      });
-    }
+    const baseURL = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
+    const res = await fetch(`${baseURL}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, updateTarget }),
+    });
 
-    console.log('🧾 パース結果:', items);
-    console.log('🛠 処理モード:', mode);
-
-    if (mode === 'supabase') {
-      console.log('📤 Supabase更新開始');
-      await updateSupabase(items);
-    } else if (mode === 'stripe') {
-      console.log('💳 Stripe更新開始');
-      await updateStripe(items);
-    } else if (mode === 'both') {
-      console.log('📤 Supabaseと💳 Stripeの両方を更新');
-      await updateSupabase(items);
-      await updateStripe(items);
-    } else {
-      console.warn('⚠️ 未定義のmode:', mode);
-    }
-
-    return NextResponse.json({ success: true });
+    const json = await res.json();
+    return NextResponse.json(json);
   } catch (error) {
     console.error('❌ アップロード失敗:', error);
     return NextResponse.json({ error: 'アップロードエラー' }, { status: 500 });

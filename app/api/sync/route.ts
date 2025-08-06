@@ -1,57 +1,50 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable prefer-const */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 
-// Supabase設定
+interface UploadItem {
+  vid: string;
+  title: string;
+  price: number;
+}
+
+interface SyncRequest {
+  items: UploadItem[];
+  updateTarget: 'supabase' | 'stripe' | 'both';
+}
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-// Stripe設定（環境変数がない場合はnullでバイパス）
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: "2025-07-30.basil" })
   : null;
 
 export async function POST(req: NextRequest) {
-  const { items, updateTarget } = await req.json();
+  const { items, updateTarget } = (await req.json()) as SyncRequest;
 
   const logs: string[] = [];
 
   for (const item of items) {
     const { vid, title, price } = item;
 
-    // 🔄 Supabaseにアップサート
     if (updateTarget === 'supabase' || updateTarget === 'both') {
-      const { error } = await supabase.from('download_vid').upsert([
-        {
-          vid,
-          title,
-          price,
-        },
-      ]);
+      const { error } = await supabase.from('download_vid').upsert([{ vid, title, price }]);
 
-      if (error) {
-        logs.push(`❌ Supabase登録失敗: ${vid} (${error.message})`);
-      } else {
-        logs.push(`✅ Supabase登録成功: ${vid}`);
-      }
+      if (error) logs.push(`❌ Supabase登録失敗: ${vid} (${error.message})`);
+      else logs.push(`✅ Supabase登録成功: ${vid}`);
     }
 
-    // 💳 Stripeに登録/更新
     if ((updateTarget === 'stripe' || updateTarget === 'both') && stripe) {
       try {
-        const response = await stripe.products.list({ limit: 100 });
-        const foundProduct = response.data.find(
-          (product) => product.metadata.vid === vid
-        );
+        const existing = await stripe.products.list({ limit: 100 });
+        const match = existing.data.find(p => p.metadata.vid === vid);
 
-        if (foundProduct) {
-          await stripe.products.update(foundProduct.id, {
+        if (match) {
+          await stripe.products.update(match.id, {
             name: `${title}_vid`,
             metadata: { vid },
           });
@@ -63,8 +56,9 @@ export async function POST(req: NextRequest) {
           });
           logs.push(`✨ Stripe新規作成成功: ${vid}`);
         }
-      } catch (err: any) {
-        logs.push(`❌ Stripe登録エラー: ${vid} (${err.message})`);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logs.push(`❌ Stripe登録エラー: ${vid} (${msg})`);
       }
     }
   }
