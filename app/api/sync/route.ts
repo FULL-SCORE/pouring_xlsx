@@ -1,64 +1,152 @@
+// ✅ app/api/sync/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import Stripe from 'stripe';
-
-interface UploadItem {
-  vid: string;
-  title: string;
-  price: number;
-}
-
-interface SyncRequest {
-  items: UploadItem[];
-  updateTarget: 'supabase' | 'stripe' | 'both';
-}
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-const stripe = stripeSecretKey
-  ? new Stripe(stripeSecretKey, { apiVersion: "2025-07-30.basil" })
-  : null;
+import { supabase } from '@/lib/supabase';
+import { stripe } from '@/lib/stripe';
 
 export async function POST(req: NextRequest) {
-  const { items, updateTarget } = (await req.json()) as SyncRequest;
-
+  const { items, updateTarget } = await req.json();
   const logs: string[] = [];
 
   for (const item of items) {
-    const { vid, title, price } = item;
+    const {
+      vid,
+      cut,
+      title,
+      keyword,
+      detail,
+      format,
+      framerate,
+      resolution,
+      metadata,
+      footageServer,
+      dulation,
+      DF,
+      push,
+      EX_ID,
+      _12K_ID,
+      _8K_ID,
+      _6K_ID,
+      _4K_ID,
+      EX_size,
+      _12K_size,
+      _8K_size,
+      _6K_size,
+      _4K_size,
+      EX_price,
+      _12K_price,
+      _8K_price,
+      _6K_price,
+      _4K_price,
+    } = item;
 
+    // Supabase: video_info に upsert
     if (updateTarget === 'supabase' || updateTarget === 'both') {
-      const { error } = await supabase.from('download_vid').upsert([{ vid, title, price }]);
+      const { error: error1 } = await supabase.from('video_info').upsert([
+        {
+          vid,
+          cut,
+          title,
+          keyword,
+          detail,
+          format,
+          framerate,
+          resolution,
+          metadata,
+          footageServer,
+          dulation,
+          DF,
+          push,
+        },
+      ]);
 
-      if (error) logs.push(`❌ Supabase登録失敗: ${vid} (${error.message})`);
-      else logs.push(`✅ Supabase登録成功: ${vid}`);
+      if (error1) {
+        logs.push(`❌ Supabase登録失敗: video_info ${vid} (${error1.message})`);
+      } else {
+        logs.push(`✅ Supabase登録成功: video_info ${vid}`);
+      }
+
+      const { error: error2 } = await supabase.from('download_vid').upsert([
+        {
+          vid,
+          EX_ID,
+          '12K_ID': _12K_ID,
+          '8K_ID': _8K_ID,
+          '6K_ID': _6K_ID,
+          '4K_ID': _4K_ID,
+          EX_size,
+          '12K_size': _12K_size,
+          '8K_size': _8K_size,
+          '6K_size': _6K_size,
+          '4K_size': _4K_size,
+        },
+      ]);
+
+      if (error2) {
+        logs.push(`❌ Supabase登録失敗: download_vid ${vid} (${error2.message})`);
+      } else {
+        logs.push(`✅ Supabase登録成功: download_vid ${vid}`);
+      }
     }
 
+    // Stripe に登録
     if ((updateTarget === 'stripe' || updateTarget === 'both') && stripe) {
       try {
-        const existing = await stripe.products.list({ limit: 100 });
-        const match = existing.data.find(p => p.metadata.vid === vid);
+        const titleVid = `${title}_vid`;
+        const day = new Date().toISOString().slice(0, 10);
 
-        if (match) {
-          await stripe.products.update(match.id, {
-            name: `${title}_vid`,
-            metadata: { vid },
+        // 既存商品を検索
+        const products = await stripe.products.list({ limit: 100 });
+        const existing = products.data.find(p => p.metadata?.vid === vid);
+
+        const metadata: Record<string, string> = {
+          vid,
+          cut: cut ?? '',
+          day,
+        };
+
+        let productId: string;
+
+        if (existing) {
+          await stripe.products.update(existing.id, {
+            name: titleVid,
+            metadata,
           });
+          productId = existing.id;
           logs.push(`🔁 Stripe更新成功: ${vid}`);
         } else {
-          await stripe.products.create({
-            name: `${title}_vid`,
-            metadata: { vid },
+          const created = await stripe.products.create({
+            name: titleVid,
+            metadata,
           });
+          productId = created.id;
           logs.push(`✨ Stripe新規作成成功: ${vid}`);
         }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logs.push(`❌ Stripe登録エラー: ${vid} (${msg})`);
+
+        // 価格登録
+        const prices = [
+          { key: 'EX_price', value: EX_price },
+          { key: '12K_price', value: _12K_price },
+          { key: '8K_price', value: _8K_price },
+          { key: '6K_price', value: _6K_price },
+          { key: '4K_price', value: _4K_price },
+        ];
+
+        for (const { key, value } of prices) {
+          if (!value) continue;
+
+          await stripe.prices.create({
+            product: productId,
+            unit_amount: parseInt(value),
+            currency: 'jpy',
+            nickname: key,
+          });
+        }
+    } catch (err: unknown) {
+        if (err instanceof Error) {
+          logs.push(`❌ Stripe登録エラー: ${vid} (${err.message})`);
+        } else {
+          logs.push(`❌ Stripe登録エラー: ${vid} (unknown error)`);
+        }
       }
     }
   }

@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 
 const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
@@ -121,7 +121,8 @@ export async function POST(req: NextRequest) {
         } else {
           logs.push(`❌ Stripe登録エラー: ${vid} (unknown error)`);
         }
-      }      
+      }
+      
     }
   }
 
