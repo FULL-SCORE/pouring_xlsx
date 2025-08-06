@@ -1,45 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import formidable, { Fields, Files } from 'formidable';
 import { parse } from 'papaparse';
-import type { IncomingMessage } from 'http';
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
-function parseForm(req: NextRequest): Promise<{ fields: Fields; files: Files }> {
-  return new Promise((resolve, reject) => {
-    const form = formidable({ multiples: false });
-
-    form.parse(req as unknown as IncomingMessage, (err, fields, files) => {
-      if (err) reject(err);
-      else resolve({ fields, files });
-    });
-  });
-}
+import { read, utils } from 'xlsx';
 
 export async function POST(req: NextRequest) {
   try {
-    const { files } = await parseForm(req);
-    const file = files.file?.[0];
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
 
-    if (!file || !file.filepath) {
-      return NextResponse.json({ error: 'ファイルが見つかりません' }, { status: 400 });
+    if (!file || !file.arrayBuffer) {
+      return NextResponse.json({ error: 'ファイルが不正です' }, { status: 400 });
     }
 
-    const fs = await import('fs/promises');
-    const buffer: Buffer = await fs.readFile(file.filepath);
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const workbook = read(buffer);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const csv = utils.sheet_to_csv(worksheet);
 
-    // XLSXパース処理（バッファ→CSV文字列→パース）
-    const xlsx = await import('xlsx');
-    const wb = xlsx.read(buffer);
-    const sheetName = wb.SheetNames[0];
-    const sheet = wb.Sheets[sheetName];
-    const csv = xlsx.utils.sheet_to_csv(sheet);
-
-    // CSV文字列をパース
     const parsed = parse(csv, { header: true });
 
     if (!parsed.data || !Array.isArray(parsed.data)) {
