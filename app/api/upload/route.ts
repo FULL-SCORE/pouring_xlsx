@@ -1,70 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
-import formidable from 'formidable';
-import { parse } from 'papaparse';
-import type { IncomingMessage } from 'http';
+import { createClient } from '@supabase/supabase-js';
+import Stripe from 'stripe';
 
-interface RowData {
-  vid?: string;
-  title?: string;
-  price?: number | string;
-}
+// Supabase設定
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// Stripe設定
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripe = stripeSecretKey
+  ? new Stripe(stripeSecretKey, { apiVersion: "2025-07-30.basil" })
+  : null;
 
-async function parseForm(req: NextRequest) {
-  const form = formidable({ multiples: false });
-
-  return new Promise<{ fields: formidable.Fields; files: formidable.Files }>((resolve, reject) => {
-    form.parse(req as unknown as IncomingMessage, (err, fields, files) => {
-      if (err) reject(err);
-      else resolve({ fields, files });
-    });
-  });
+interface Item {
+  vid: string;
+  title: string;
+  price: number;
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const { fields, files } = await parseForm(req);
-    const updateTarget = fields.updateTarget?.[0] ?? 'both';
-    const file = files.file?.[0];
+  const { items, updateTarget }: { items: Item[]; updateTarget: 'supabase' | 'stripe' | 'both' } =
+    await req.json();
 
-    if (!file || !file.filepath) {
-      return NextResponse.json({ error: 'ファイルが見つかりません' }, { status: 400 });
+  const logs: string[] = [];
+
+  for (const item of items) {
+    const { vid, title, price } = item;
+
+    // Supabase アップサート
+    if (updateTarget === 'supabase' || updateTarget === 'both') {
+      const { error } = await supabase.from('download_vid').upsert([{ vid, title, price }]);
+
+      if (error) {
+        logs.push(`❌ Supabase登録失敗: ${vid} (${error.message})`);
+      } else {
+        logs.push(`✅ Supabase登録成功: ${vid}`);
+      }
     }
 
-    const fs = await import('fs/promises');
-    const buffer = await fs.readFile(file.filepath);
+    // Stripe 登録 or 更新
+    if ((updateTarget === 'stripe' || updateTarget === 'both') && stripe) {
+      try {
+        const response = await stripe.products.list({ limit: 100 });
+        const foundProduct = response.data.find((product) => product.metadata.vid === vid);
 
-    const xlsx = await import('xlsx');
-    const wb = xlsx.read(buffer);
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const csv = xlsx.utils.sheet_to_csv(sheet);
-
-    const parsed = parse(csv, { header: true });
-
-    const items = (parsed.data as RowData[])
-  .map((row) => ({
-    vid: String(row.vid ?? ''),
-    title: String(row.title ?? ''),
-    price: Number(row.price ?? 0),
-  }))
-      .filter((item) => item.vid && item.title);
-
-    const baseURL = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
-    const res = await fetch(`${baseURL}/api/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, updateTarget }),
-    });
-
-    const json = await res.json();
-    return NextResponse.json(json);
-  } catch (error) {
-    console.error('❌ アップロード失敗:', error);
-    return NextResponse.json({ error: 'アップロードエラー' }, { status: 500 });
+        if (foundProduct) {
+          await stripe.products.update(foundProduct.id, {
+            name: `${title}_vid`,
+            metadata: { vid },
+          });
+          logs.push(`🔁 Stripe更新成功: ${vid}`);
+        } else {
+          await stripe.products.create({
+            name: `${title}_vid`,
+            metadata: { vid },
+          });
+          logs.push(`✨ Stripe新規作成成功: ${vid}`);
+        }
+      } catch (err) {
+        logs.push(`❌ Stripe登録エラー: ${vid} (${(err as Error).message})`);
+      }
+    }
   }
+
+  return NextResponse.json({ logs });
 }
