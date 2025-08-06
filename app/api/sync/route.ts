@@ -41,23 +41,29 @@ export async function POST(req: NextRequest) {
 
     // Supabase: video_info に upsert
     if (updateTarget === 'supabase' || updateTarget === 'both') {
-      const { error: error1 } = await supabase.from('video_info').upsert([
-        {
-          vid,
-          cut,
-          title,
-          keyword,
-          detail,
-          format,
-          framerate,
-          resolution,
-          metadata,
-          footageServer,
-          dulation,
-          DF,
-          push,
-        },
-      ]);
+        const { error: error1 } = await supabase
+  .from('video_info')
+  .upsert(
+    [{
+      vid,
+      cut,
+      title,
+      keyword,
+      detail,
+      format,
+      framerate,
+      resolution,
+      metadata,
+      footageServer,
+      dulation,
+      DF,
+      push,
+    }],
+    {
+      onConflict: 'vid', // ✅ string に修正！
+    }
+  );
+      
 
       if (error1) {
         logs.push(`❌ Supabase登録失敗: video_info ${vid} (${error1.message})`);
@@ -90,64 +96,64 @@ export async function POST(req: NextRequest) {
 
     // Stripe に登録
     if ((updateTarget === 'stripe' || updateTarget === 'both') && stripe) {
-      try {
-        const titleVid = `${title}_vid`;
-        const day = new Date().toISOString().slice(0, 10);
-
-        // 既存商品を検索
-        const products = await stripe.products.list({ limit: 100 });
-        const existing = products.data.find(p => p.metadata?.vid === vid);
-
-        const metadata: Record<string, string> = {
-          vid,
-          cut: cut ?? '',
-          day,
-        };
-
-        let productId: string;
-
-        if (existing) {
-          await stripe.products.update(existing.id, {
-            name: titleVid,
-            metadata,
-          });
-          productId = existing.id;
-          logs.push(`🔁 Stripe更新成功: ${vid}`);
-        } else {
-          const created = await stripe.products.create({
-            name: titleVid,
-            metadata,
-          });
-          productId = created.id;
-          logs.push(`✨ Stripe新規作成成功: ${vid}`);
-        }
-
-        // 価格登録
-        const prices = [
-          { key: 'EX_price', value: EX_price },
-          { key: '12K_price', value: _12K_price },
-          { key: '8K_price', value: _8K_price },
-          { key: '6K_price', value: _6K_price },
-          { key: '4K_price', value: _4K_price },
-        ];
-
-        for (const { key, value } of prices) {
-          if (!value) continue;
-
-          await stripe.prices.create({
-            product: productId,
-            unit_amount: parseInt(value),
-            currency: 'jpy',
-            nickname: key,
-          });
-        }
-    } catch (err: unknown) {
-        if (err instanceof Error) {
-          logs.push(`❌ Stripe登録エラー: ${vid} (${err.message})`);
-        } else {
-          logs.push(`❌ Stripe登録エラー: ${vid} (unknown error)`);
-        }
-      }
+        try {
+            const titleFormatted = `${title}（${cut ?? 'cutなし'}）_${vid}`;
+            const day = new Date().toISOString().slice(0, 10);
+          
+            const products = await stripe.products.list({ limit: 100 });
+            const existing = products.data.find(p => p.metadata?.vid === vid);
+          
+            const metadata: Record<string, string> = {
+                vid,
+                cut: cut ?? '',
+                day,
+              };
+          
+            let productId: string;
+          
+            if (existing) {
+                await stripe.products.update(existing.id, {
+                    name: titleFormatted,
+                    metadata,
+                  });
+              productId = existing.id;
+              logs.push(`🔁 Stripe更新成功: ${vid}`);
+            } else {
+              const created = await stripe.products.create({
+                name: titleFormatted,
+                metadata,
+              });
+              productId = created.id;
+              logs.push(`✨ Stripe新規作成成功: ${productId}`);
+            }
+          
+            // 価格登録（単位に注意: JPYの場合1円→100銭）
+            const prices = [
+              { key: 'EX_price', value: EX_price },
+              { key: '12K_price', value: _12K_price },
+              { key: '8K_price', value: _8K_price },
+              { key: '6K_price', value: _6K_price },
+              { key: '4K_price', value: _4K_price },
+            ];
+          
+            for (const { key, value } of prices) {
+                if (!value) continue;
+              
+                await stripe.prices.create({
+                  product: productId,
+                  unit_amount: Math.round(parseInt(value) / 100), // 価格を補正
+                  currency: 'jpy',
+                  nickname: key,
+                });
+                logs.push(`💰 Stripe価格追加: ${key}`);
+              }
+          } catch (err: unknown) {
+            if (err instanceof Error) {
+              logs.push(`❌ Stripe登録エラー: ${vid} (${err.message})`);
+            } else {
+              logs.push(`❌ Stripe登録エラー: ${vid} (unknown error)`);
+            }
+          }
     }
   }
 
