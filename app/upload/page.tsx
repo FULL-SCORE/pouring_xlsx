@@ -62,7 +62,7 @@ export default function UploadPage() {
 
       <div>
         <h2 className="font-semibold mb-2">ログ出力:</h2>
-        <pre className="bg-gray-100 p-4 max-h-96 overflow-y-scroll whitespace-pre-wrap">
+        <pre className="bg-gray-100 p-4 max-h-96 overflow-y-scroll whitespace-pre-wrap text-black">
           {logs.join('\n')}
         </pre>
       </div>
