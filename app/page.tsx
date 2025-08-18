@@ -57,7 +57,8 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white p-10 font-sans">
+    <main className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white font-sans flex items-center justify-center">
+      <div>
       <h1 className="text-4xl font-extrabold text-center mb-10">データアップローダー</h1>
 
       <div className="max-w-xl mx-auto space-y-6 bg-gray-800/60 p-6 rounded-2xl shadow-xl">
@@ -131,6 +132,7 @@ export default function Home() {
             </ul>
           </div>
         )}
+      </div>
       </div>
     </main>
   );
