@@ -14,6 +14,19 @@ const schema = z.object({
   stripeEnv: z.string().optional(),
 });
 
+// 解像度ソート関数
+function sortResolutionByLabelPriority(resolutionStr: string) {
+  const priority = ['12K', '8K', '6K', '4K', 'EX'];
+  try {
+    const json = typeof resolutionStr === 'string' ? JSON.parse(resolutionStr) : resolutionStr;
+    const entries = Object.entries(json) as [string, string][];
+    const sorted = entries.sort(([keyA], [keyB]) => priority.indexOf(keyA) - priority.indexOf(keyB));
+    return JSON.stringify(Object.fromEntries(sorted));
+  } catch {
+    return resolutionStr;
+  }
+}
+
 export async function POST(req: Request) {
   const body = await req.json();
   const { json, service, stripeEnv } = schema.parse(body);
@@ -56,19 +69,8 @@ export async function POST(req: Request) {
 
     // ---------- Supabase ----------
     if (service !== 'stripe') {
-      const parsedResolution: Record<string, string> = typeof resolution === 'string' ? JSON.parse(resolution) : resolution;
-      const sortedResolution = Object.entries(parsedResolution)
-      .sort(([, a], [, b]) => {
-        const [wA, hA] = (a as string).split('×').map(Number);
-        const [wB, hB] = (b as string).split('×').map(Number);
-        return wB * hB - wA * hA;
-      })
-        .reduce((acc, [k, v]) => {
-          acc[k] = v;
-          return acc;
-        }, {} as Record<string, string>);
-
-      const parsedMetadata = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
+      const sortedResolution = sortResolutionByLabelPriority(resolution);
+      const metadataStr = typeof metadata === 'object' ? JSON.stringify(metadata) : String(metadata);
 
       const videoInfoData = {
         vid,
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
         format,
         framerate,
         resolution: sortedResolution,
-        metadata: parsedMetadata,
+        metadata: metadataStr,
         footageServer,
         dulation,
         DF,
@@ -108,9 +110,11 @@ export async function POST(req: Request) {
         .from('download_vid')
         .upsert(downloadVidData, { onConflict: 'vid' });
 
-      const status =
-        videoInfoError || downloadVidError ? '更新失敗' : '更新成功';
-      supabaseLogs.push(`${vid} ${status}`);
+      if (videoInfoError || downloadVidError) {
+        supabaseLogs.push(`${vid} 登録失敗`);
+      } else {
+        supabaseLogs.push(`${vid} 登録・更新成功`);
+      }
     }
 
     // ---------- Stripe ----------
@@ -118,8 +122,8 @@ export async function POST(req: Request) {
       const formattedTitle = `${title.replace(/\(.*?\)/g, '').trim()}${cut}_${vid}`;
       const vidStr = String(vid);
 
-      // 画像URL
-      let imageUrl: string | undefined;
+      // vidから画像URLを生成
+      let imageUrl: string | undefined = undefined;
       if (vidStr.length >= 12) {
         const folderRaw = vidStr.slice(4, 10);
         const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`;
@@ -128,8 +132,8 @@ export async function POST(req: Request) {
 
       const allProducts = await stripe.products.list({ limit: 100 }).autoPagingToArray({ limit: 1000 });
       const existingProduct = allProducts.find(p => p.metadata?.vid === vidStr);
-      let product;
 
+      let product;
       if (existingProduct) {
         product = await stripe.products.update(existingProduct.id, {
           name: formattedTitle,
@@ -140,6 +144,7 @@ export async function POST(req: Request) {
             cut: String(cut),
           },
         });
+
         stripeLogs.push(`${formattedTitle} 商品更新`);
       } else {
         product = await stripe.products.create({
@@ -151,6 +156,7 @@ export async function POST(req: Request) {
             cut: String(cut),
           },
         });
+
         stripeLogs.push(`${formattedTitle} 商品新規作成`);
       }
 
@@ -164,11 +170,12 @@ export async function POST(req: Request) {
         { amount: price_4K, quality: '4K' },
       ]) {
         if (!amount) continue;
-        const unitAmount = parseInt(amount, 10);
 
+        const unitAmount = parseInt(amount, 10);
         const alreadyExists = allPrices.some(
           p => p.unit_amount === unitAmount && p.nickname === quality && p.active === true
         );
+
         if (alreadyExists) {
           stripeLogs.push(`${formattedTitle} - ${quality}（重複価格スキップ）`);
           continue;
