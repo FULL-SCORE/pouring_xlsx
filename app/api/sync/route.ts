@@ -54,12 +54,12 @@ export async function POST(req: Request) {
       '4K_price': price_4K,
     } = row;
 
+    const vidStr = String(vid);
+
     // ---------- Supabase ----------
     if (service !== 'stripe') {
-      const cleanResolution =
-        typeof resolution === 'object' ? JSON.stringify(resolution) : String(resolution);
-      const cleanMetadata =
-        typeof metadata === 'object' ? JSON.stringify(metadata) : String(metadata);
+      const cleanResolution = String(resolution).replace(/^"(.*)"$/, '$1').replace(/\//g, '');
+      const cleanMetadata = String(metadata).replace(/^"(.*)"$/, '$1').replace(/\//g, '');
 
       const videoInfoData = {
         vid,
@@ -91,9 +91,25 @@ export async function POST(req: Request) {
         '4K_size': size_4K,
       };
 
+      // video_info の存在確認
+      const { data: existingVideoInfo } = await supabase
+        .from('video_info')
+        .select('vid')
+        .eq('vid', vid);
+
+      const isNewVideoInfo = !existingVideoInfo || existingVideoInfo.length === 0;
+
       const { error: videoInfoError } = await supabase
         .from('video_info')
         .upsert(videoInfoData, { onConflict: 'vid' });
+
+      // download_vid の存在確認
+      const { data: existingDownloadVid } = await supabase
+        .from('download_vid')
+        .select('vid')
+        .eq('vid', vid);
+
+      const isNewDownloadVid = !existingDownloadVid || existingDownloadVid.length === 0;
 
       const { error: downloadVidError } = await supabase
         .from('download_vid')
@@ -102,16 +118,19 @@ export async function POST(req: Request) {
       if (videoInfoError || downloadVidError) {
         supabaseLogs.push(`❌ ${vid} 登録失敗`);
       } else {
-        supabaseLogs.push(`✅ ${vid} 登録成功`);
+        const status = [
+          isNewVideoInfo ? '新規' : '更新',
+          isNewDownloadVid ? '新規' : '更新'
+        ].join('/');
+        supabaseLogs.push(`✅ ${vid} 登録成功（${status}）`);
       }
     }
 
     // ---------- Stripe ----------
     if (service !== 'supabase') {
       const formattedTitle = `${title.replace(/\(.*?\)/g, '').trim()}${cut}_${vid}`;
-      const vidStr = String(vid);
 
-      let imageUrl: string | undefined;
+      let imageUrl: string | undefined = undefined;
       if (vidStr.length >= 12) {
         const folderRaw = vidStr.slice(4, 10);
         const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`;
@@ -120,8 +139,8 @@ export async function POST(req: Request) {
 
       const allProducts = await stripe.products.list({ limit: 100 }).autoPagingToArray({ limit: 1000 });
       const existingProduct = allProducts.find(p => p.metadata?.vid === vidStr);
-      let product;
 
+      let product;
       if (existingProduct) {
         product = await stripe.products.update(existingProduct.id, {
           name: formattedTitle,
@@ -158,7 +177,6 @@ export async function POST(req: Request) {
         { amount: price_4K, quality: '4K' },
       ]) {
         if (!amount) continue;
-
         const unitAmount = parseInt(amount, 10);
 
         const alreadyExists = allPrices.some(
@@ -187,7 +205,7 @@ export async function POST(req: Request) {
           metadata: { quality },
         });
 
-        stripeLogs.push(`💰 ${formattedTitle} - ${quality}（価格新規作成）`);
+        stripeLogs.push(`✅ ${formattedTitle} - ${quality}（価格新規作成）`);
       }
     }
   }
