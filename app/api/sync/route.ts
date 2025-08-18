@@ -52,11 +52,13 @@ export async function POST(req: Request) {
       '8K_price': price_8K,
       '6K_price': price_6K,
       '4K_price': price_4K,
-      thumb,
     } = row;
 
     // ---------- Supabase ----------
     if (service !== 'stripe') {
+      const cleanResolution = String(resolution).replace(/^"(.*)"$/, '$1').replace(/\//g, '');
+      const cleanMetadata = String(metadata).replace(/^"(.*)"$/, '$1').replace(/\//g, '');
+
       const videoInfoData = {
         vid,
         cut,
@@ -65,8 +67,8 @@ export async function POST(req: Request) {
         detail,
         format,
         framerate,
-        resolution: JSON.stringify(JSON.parse(resolution)),
-        metadata: JSON.stringify(JSON.parse(metadata)),
+        resolution: cleanResolution,
+        metadata: cleanMetadata,
         footageServer,
         dulation,
         DF,
@@ -90,83 +92,108 @@ export async function POST(req: Request) {
       const { error: videoInfoError } = await supabase
         .from('video_info')
         .upsert(videoInfoData, { onConflict: 'vid' });
+
       const { error: downloadVidError } = await supabase
         .from('download_vid')
         .upsert(downloadVidData, { onConflict: 'vid' });
 
       if (videoInfoError || downloadVidError) {
-        supabaseLogs.push(`❌ ${vid} 登録失敗`);
+        supabaseLogs.push(`${vid} 登録失敗`);
       } else {
-        supabaseLogs.push(`✅ ${vid} 登録成功`);
+        supabaseLogs.push(`${vid} 登録成功`);
       }
     }
 
     // ---------- Stripe ----------
     if (service !== 'supabase') {
       const formattedTitle = `${title.replace(/\(.*?\)/g, '').trim()}${cut}_${vid}`;
+      const vidStr = String(vid);
 
-      // thumb列から画像URLを抽出
+      // vidから画像URLを生成
       let imageUrl: string | undefined = undefined;
-      if (typeof thumb === 'string') {
-        const match = thumb.match(/https?:\/\/[^\")]+/);
-        if (match) {
-          imageUrl = match[0].trim();
-        }
+      if (vidStr.length >= 12) {
+        const folderRaw = vidStr.slice(4, 10); // 例: 009202
+        const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`; // 0092_02
+        imageUrl = `https://expix-ft.jp/ex/footage/${folder}/720/${vidStr}.jpg`;
+        console.log(`imageUrl for vid ${vidStr}: ${imageUrl}`);
       }
 
-      const productList = await stripe.products.list({ limit: 100 });
-      const existingProduct = productList.data.find(
-        (p) => p.name === formattedTitle
-      );
+      // 商品検索（全件）
+      const allProducts = await stripe.products.list({ limit: 100 }).autoPagingToArray({ limit: 1000 });
 
+      const existingProduct = allProducts.find(p => p.metadata?.vid === vidStr);
       let product;
+
       if (existingProduct) {
         product = await stripe.products.update(existingProduct.id, {
           name: formattedTitle,
           images: imageUrl ? [imageUrl] : undefined,
-          metadata: { vid, day: new Date().toISOString().slice(0, 10), cut: String(cut) },
+          metadata: {
+            vid,
+            day: new Date().toISOString().slice(0, 10),
+            cut: String(cut),
+          },
         });
+
+        stripeLogs.push(`${formattedTitle} 商品更新`);
       } else {
         product = await stripe.products.create({
           name: formattedTitle,
           images: imageUrl ? [imageUrl] : undefined,
-          metadata: { vid, day: new Date().toISOString().slice(0, 10), cut: String(cut) },
+          metadata: {
+            vid,
+            day: new Date().toISOString().slice(0, 10),
+            cut: String(cut),
+          },
         });
+
+        stripeLogs.push(`${formattedTitle} 商品新規作成`);
       }
 
-      const prices = [
+      // 価格の重複チェック・作成
+      const allPrices = await stripe.prices.list({ product: product.id, limit: 100 }).autoPagingToArray({ limit: 1000 });
+
+      for (const { amount, quality } of [
         { amount: EX_price, quality: 'EX' },
         { amount: price_12K, quality: '12K' },
         { amount: price_8K, quality: '8K' },
         { amount: price_6K, quality: '6K' },
         { amount: price_4K, quality: '4K' },
-      ];
-
-      const existingPrices = await stripe.prices.list({
-        product: product.id,
-        limit: 100,
-      });
-
-      for (const { amount, quality } of prices) {
+      ]) {
         if (!amount) continue;
 
         const unitAmount = parseInt(amount, 10);
-        const matched = existingPrices.data.find(
-          (p) => p.nickname === quality && p.unit_amount === unitAmount && p.currency === 'jpy'
+
+        // 重複価格があるかチェック
+        const alreadyExists = allPrices.some(
+          p =>
+            p.unit_amount === unitAmount &&
+            p.nickname === quality &&
+            p.active === true
         );
 
-        if (!matched) {
-          await stripe.prices.create({
-            unit_amount: unitAmount,
-            currency: 'jpy',
-            product: product.id,
-            nickname: quality,
-            metadata: { quality },
-          });
+        if (alreadyExists) {
+          stripeLogs.push(`${formattedTitle} - ${quality}（重複価格スキップ）`);
+          continue;
         }
-      }
 
-      stripeLogs.push(`🟢 ${formattedTitle} 処理完了`);
+        // すべての価格を非アクティブにする（初回のみ）
+        for (const price of allPrices) {
+          if (price.active) {
+            await stripe.prices.update(price.id, { active: false });
+          }
+        }
+
+        await stripe.prices.create({
+          unit_amount: unitAmount,
+          currency: 'jpy',
+          product: product.id,
+          nickname: quality,
+          metadata: { quality },
+        });
+
+        stripeLogs.push(`${formattedTitle} - ${quality}（価格新規作成）`);
+      }
     }
   }
 
