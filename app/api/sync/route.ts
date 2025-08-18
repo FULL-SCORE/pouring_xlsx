@@ -14,17 +14,22 @@ const schema = z.object({
   stripeEnv: z.string().optional(),
 });
 
-// 解像度ソート関数
-function sortResolutionByLabelPriority(resolutionStr: string) {
+// ラベル順でresolutionをソートする関数
+function sortResolutionByLabelPriority(resolution: any): Record<string, string> {
   const priority = ['12K', '8K', '6K', '4K', 'EX'];
+  let parsed: Record<string, string>;
+
   try {
-    const json = typeof resolutionStr === 'string' ? JSON.parse(resolutionStr) : resolutionStr;
-    const entries = Object.entries(json) as [string, string][];
-    const sorted = entries.sort(([keyA], [keyB]) => priority.indexOf(keyA) - priority.indexOf(keyB));
-    return JSON.stringify(Object.fromEntries(sorted));
+    parsed = typeof resolution === 'string' ? JSON.parse(resolution) : resolution;
   } catch {
-    return resolutionStr;
+    return {};
   }
+
+  return Object.fromEntries(
+    Object.entries(parsed).sort(
+      ([a], [b]) => priority.indexOf(a) - priority.indexOf(b)
+    )
+  );
 }
 
 export async function POST(req: Request) {
@@ -54,7 +59,7 @@ export async function POST(req: Request) {
       '12K_ID': ID_12K,
       '8K_ID': ID_8K,
       '6K_ID': ID_6K,
-      '4K_ID': ID_4K,
+      '4K_ID': ID_4,
       EX_size,
       '12K_size': size_12K,
       '8K_size': size_8K,
@@ -70,7 +75,12 @@ export async function POST(req: Request) {
     // ---------- Supabase ----------
     if (service !== 'stripe') {
       const sortedResolution = sortResolutionByLabelPriority(resolution);
-      const metadataStr = typeof metadata === 'object' ? JSON.stringify(metadata) : String(metadata);
+      const resolutionStr = JSON.stringify(sortedResolution);
+
+      const metadataObj = typeof metadata === 'string'
+        ? (() => { try { return JSON.parse(metadata); } catch { return {}; } })()
+        : metadata;
+      const metadataStr = JSON.stringify(metadataObj);
 
       const videoInfoData = {
         vid,
@@ -80,7 +90,7 @@ export async function POST(req: Request) {
         detail,
         format,
         framerate,
-        resolution: sortedResolution,
+        resolution: resolutionStr,
         metadata: metadataStr,
         footageServer,
         dulation,
@@ -94,7 +104,7 @@ export async function POST(req: Request) {
         '12K_ID': ID_12K,
         '8K_ID': ID_8K,
         '6K_ID': ID_6K,
-        '4K_ID': ID_4K,
+        '4K_ID': ID_4,
         EX_size,
         '12K_size': size_12K,
         '8K_size': size_8K,
@@ -122,8 +132,7 @@ export async function POST(req: Request) {
       const formattedTitle = `${title.replace(/\(.*?\)/g, '').trim()}${cut}_${vid}`;
       const vidStr = String(vid);
 
-      // vidから画像URLを生成
-      let imageUrl: string | undefined = undefined;
+      let imageUrl: string | undefined;
       if (vidStr.length >= 12) {
         const folderRaw = vidStr.slice(4, 10);
         const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`;
@@ -144,7 +153,6 @@ export async function POST(req: Request) {
             cut: String(cut),
           },
         });
-
         stripeLogs.push(`${formattedTitle} 商品更新`);
       } else {
         product = await stripe.products.create({
@@ -156,7 +164,6 @@ export async function POST(req: Request) {
             cut: String(cut),
           },
         });
-
         stripeLogs.push(`${formattedTitle} 商品新規作成`);
       }
 
