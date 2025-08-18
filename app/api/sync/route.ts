@@ -15,23 +15,11 @@ const schema = z.object({
 });
 
 function sortResolutionByLabelPriority(
-  resolution: string | Record<string, string>
+  resolution: Record<string, string>
 ): Record<string, string> {
   const priority = ['12K', '8K', '6K', '4K', 'EX'];
-  let parsed: Record<string, string>;
-
-  if (typeof resolution === 'string') {
-    try {
-      parsed = JSON.parse(resolution);
-    } catch {
-      return {};
-    }
-  } else {
-    parsed = resolution;
-  }
-
   return Object.fromEntries(
-    Object.entries(parsed).sort(
+    Object.entries(resolution).sort(
       ([a], [b]) => priority.indexOf(a) - priority.indexOf(b)
     )
   );
@@ -79,14 +67,21 @@ export async function POST(req: Request) {
 
     // ---------- Supabase ----------
     if (service !== 'stripe') {
-      // resolution を安全にオブジェクト化し、優先順位で並べて JSON 化
-      const resolutionObj = typeof resolution === 'string' ? JSON.parse(resolution) : resolution;
+      let resolutionObj: Record<string, string> = {};
+      if (typeof resolution === 'string') {
+        try {
+          resolutionObj = JSON.parse(resolution);
+        } catch {
+          resolutionObj = {};
+        }
+      } else {
+        resolutionObj = resolution;
+      }
       const sortedResolution = sortResolutionByLabelPriority(resolutionObj);
-      const resolutionStr = JSON.stringify(sortedResolution);
-      
-      // metadata も安全にオブジェクト化して JSON 化
-      const metadataObj = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
-      const metadataStr = JSON.stringify(metadataObj);
+
+      const metadataObj = typeof metadata === 'string'
+        ? (() => { try { return JSON.parse(metadata); } catch { return {}; } })()
+        : metadata;
 
       const videoInfoData = {
         vid,
@@ -96,8 +91,8 @@ export async function POST(req: Request) {
         detail,
         format,
         framerate,
-        resolution: resolutionStr,
-        metadata: metadataStr,
+        resolution: sortedResolution,
+        metadata: metadataObj,
         footageServer,
         dulation,
         DF,
