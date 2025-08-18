@@ -79,12 +79,13 @@ export async function POST(req: Request) {
 
     // ---------- Supabase ----------
     if (service !== 'stripe') {
-      const sortedResolution = sortResolutionByLabelPriority(resolution);
+      // resolution を安全にオブジェクト化し、優先順位で並べて JSON 化
+      const resolutionObj = typeof resolution === 'string' ? JSON.parse(resolution) : resolution;
+      const sortedResolution = sortResolutionByLabelPriority(resolutionObj);
       const resolutionStr = JSON.stringify(sortedResolution);
-
-      const metadataObj = typeof metadata === 'string'
-        ? (() => { try { return JSON.parse(metadata); } catch { return {}; } })()
-        : metadata;
+      
+      // metadata も安全にオブジェクト化して JSON 化
+      const metadataObj = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
       const metadataStr = JSON.stringify(metadataObj);
 
       const videoInfoData = {
