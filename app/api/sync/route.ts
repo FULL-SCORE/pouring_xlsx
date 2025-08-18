@@ -14,15 +14,20 @@ const schema = z.object({
   stripeEnv: z.string().optional(),
 });
 
-// ラベル順でresolutionをソートする関数
-function sortResolutionByLabelPriority(resolution: any): Record<string, string> {
+function sortResolutionByLabelPriority(
+  resolution: string | Record<string, string>
+): Record<string, string> {
   const priority = ['12K', '8K', '6K', '4K', 'EX'];
   let parsed: Record<string, string>;
 
-  try {
-    parsed = typeof resolution === 'string' ? JSON.parse(resolution) : resolution;
-  } catch {
-    return {};
+  if (typeof resolution === 'string') {
+    try {
+      parsed = JSON.parse(resolution);
+    } catch {
+      return {};
+    }
+  } else {
+    parsed = resolution;
   }
 
   return Object.fromEntries(
