@@ -112,8 +112,8 @@ export async function POST(req: Request) {
       // vidから画像URLを生成
       let imageUrl: string | undefined = undefined;
       if (vidStr.length >= 12) {
-        const folderRaw = vidStr.slice(4, 10); // 例: 009202
-        const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`; // 0092_02
+        const folderRaw = vidStr.slice(4, 10);
+        const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`;
         imageUrl = `https://expix-ft.jp/ex/footage/${folder}/720/${vidStr}.jpg`;
         console.log(`imageUrl for vid ${vidStr}: ${imageUrl}`);
       }

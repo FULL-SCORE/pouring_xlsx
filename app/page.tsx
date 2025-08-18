@@ -63,7 +63,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen p-10 text-white bg-black">
-      <h1 className="text-3xl font-bold mb-6">ファイルアップロード（トップページ）</h1>
+      <h1 className="text-3xl font-bold mb-6">ファイルアップロード</h1>
 
       <div className="mb-4">
         <label className="block mb-2 font-bold">サービス選択:</label>
