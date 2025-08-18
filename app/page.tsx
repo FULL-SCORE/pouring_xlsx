@@ -14,7 +14,7 @@ export default function Home() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
-    setAlert(null); // アラート初期化
+    setAlert(null);
   };
 
   const handleUpload = async () => {
@@ -36,22 +36,17 @@ export default function Home() {
         const response = await fetch('/api/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            json,
-            service,
-            stripeEnv,
-          }),
+          body: JSON.stringify({ json, service, stripeEnv }),
         });
 
         const result = await response.json();
         const combinedLogs = [...(result.supabaseLogs || []), ...(result.stripeLogs || [])];
         setLogs(combinedLogs);
-
         setAlert({ type: 'success', message: 'アップロードが完了しました。' });
       } catch (error) {
         setAlert({
           type: 'error',
-          message: `アップロード中にエラーが発生しました: ${(error as Error).message}`,
+          message: `エラー発生: ${(error as Error).message}`,
         });
       } finally {
         setIsUploading(false);
@@ -62,80 +57,81 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen p-10 text-white bg-black">
-      <h1 className="text-3xl font-bold mb-6">ファイルアップロード</h1>
+    <main className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white p-10 font-sans">
+      <h1 className="text-4xl font-extrabold text-center mb-10">データアップローダー</h1>
 
-      <div className="mb-4">
-        <label className="block mb-2 font-bold">サービス選択:</label>
-        <select
-          className="text-white px-2 py-1 rounded"
-          value={service}
-          onChange={(e) =>
-            setService(e.target.value as 'supabase' | 'stripe' | 'both')
-          }
-        >
-          <option className='text-black' value="supabase">Supabase</option>
-          <option className='text-black' value="stripe">Stripe</option>
-          <option className='text-black' value="both">Supabase & Stripe</option>
-        </select>
-      </div>
-
-      {(service === 'stripe' || service === 'both') && (
-        <div className="mb-4">
-          <label className="block mb-2 font-bold">Stripe環境:</label>
+      <div className="max-w-xl mx-auto space-y-6 bg-gray-800/60 p-6 rounded-2xl shadow-xl">
+        <div>
+          <label className="block font-semibold mb-2">サービス選択:</label>
           <select
-            className="text-white px-2 py-1 rounded"
-            value={stripeEnv}
-            onChange={(e) => setStripeEnv(e.target.value as 'test' | 'live')}
+            value={service}
+            onChange={(e) => setService(e.target.value as 'supabase' | 'stripe' | 'both')}
+            className="w-full bg-gray-900 text-white px-4 py-2 rounded-lg border border-gray-700 focus:outline-none"
           >
-            <option className='text-black' value="test">テスト</option>
-            <option className='text-black' value="live">本番</option>
+            <option value="supabase">Supabase のみ</option>
+            <option value="stripe">Stripe のみ</option>
+            <option value="both">Supabase & Stripe</option>
           </select>
         </div>
-      )}
 
-      <div className="mb-4">
-        <input
-          type="file"
-          accept=".xlsx,.xls"
-          onChange={handleFileChange}
-          className="text-white"
-        />
-        {selectedFile && (
-          <p className="mt-1 text-sm text-gray-300">選択されたファイル: {selectedFile.name}</p>
+        {(service === 'stripe' || service === 'both') && (
+          <div>
+            <label className="block font-semibold mb-2">Stripe 環境:</label>
+            <select
+              value={stripeEnv}
+              onChange={(e) => setStripeEnv(e.target.value as 'test' | 'live')}
+              className="w-full bg-gray-900 text-white px-4 py-2 rounded-lg border border-gray-700 focus:outline-none"
+            >
+              <option value="test">テスト環境</option>
+              <option value="live">本番環境</option>
+            </select>
+          </div>
+        )}
+
+        <div>
+          <label className="block font-semibold mb-2">ファイル選択 (.xlsx):</label>
+          <input
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleFileChange}
+            className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-700 hover:file:bg-blue-800"
+          />
+          {selectedFile && (
+            <p className="mt-2 text-xs text-gray-400">選択中: {selectedFile.name}</p>
+          )}
+        </div>
+
+        <div>
+          <button
+            onClick={handleUpload}
+            disabled={isUploading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition"
+          >
+            {isUploading ? 'アップロード中...' : 'アップロード開始'}
+          </button>
+        </div>
+
+        {alert && (
+          <div
+            className={`p-4 rounded-lg text-sm animate-fade-in ${
+              alert.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+            }`}
+          >
+            {alert.message}
+          </div>
+        )}
+
+        {logs.length > 0 && (
+          <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 max-h-64 overflow-y-auto">
+            <h2 className="text-lg font-bold mb-2">ログ:</h2>
+            <ul className="list-disc list-inside space-y-1 text-sm text-gray-300">
+              {logs.map((log, i) => (
+                <li key={i}>{log}</li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
-
-      <div className="mb-6">
-        <button
-          onClick={handleUpload}
-          disabled={isUploading}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:opacity-50"
-        >
-          アップロード
-        </button>
-      </div>
-
-      {alert && (
-        <div
-          className={`mb-6 p-3 rounded ${
-            alert.type === 'success' ? 'bg-green-600' : 'bg-red-600'
-          }`}
-        >
-          {alert.message}
-        </div>
-      )}
-
-      {logs.length > 0 && (
-        <div className="bg-gray-800 p-4 rounded">
-          <h2 className="text-lg font-bold mb-2">ログ:</h2>
-          <ul className="text-sm space-y-1">
-            {logs.map((log, i) => (
-              <li key={i}>{log}</li>
-            ))}
-          </ul>
-        </div>
-      )}
     </main>
   );
 }
