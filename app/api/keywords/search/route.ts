@@ -1,3 +1,4 @@
+// app/api/keywords/search/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -10,26 +11,28 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const query = searchParams.get("query")?.trim();
 
-  // クエリが空なら空配列
-  if (!query) {
-    return NextResponse.json([]);
-  }
+  if (!query) return NextResponse.json([]);
 
-  // 🔴 まずは answer だけを見る（確実）
+  // ✅ answer だけでなく、ひらがな/ローマ字/英語も検索対象にする
+  // ✅ 返すのも4列
   const { data, error } = await supabase
     .from("dictionary")
-    .select("answer")
-    .ilike("answer", `%${query}%`)
+    .select("answer,inputHiragana,inputRomaji,inputEnglish")
+    .or(
+      [
+        `answer.ilike.%${query}%`,
+        `inputHiragana.ilike.%${query}%`,
+        `inputRomaji.ilike.%${query}%`,
+        `inputEnglish.ilike.%${query}%`,
+      ].join(",")
+    )
     .order("answer", { ascending: true })
-    .limit(30);
+    .limit(50);
 
   if (error) {
     console.error("dictionary search error:", error);
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json(data ?? []);
 }

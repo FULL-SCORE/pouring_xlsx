@@ -1,7 +1,6 @@
 import DictionaryMissingSection from "@/components/DictionaryMissingSection";
 import DictionaryUnusedSection from "@/components/DictionaryUnusedSection";
 import DictionaryManageSection from "@/components/DictionaryManageSection";
-import SearchDictionary from "@/components/SearchDictionary";
 
 export default function Page() {
   return (

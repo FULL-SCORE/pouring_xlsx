@@ -3,10 +3,15 @@
 type Props = {
   keyword: string;
   usedCount: number;
+
   hiragana: string;
-  alphabet: string;
+  romaji: string;
+  english: string;
+
   onChangeHiragana: (v: string) => void;
-  onChangeAlphabet: (v: string) => void;
+  onChangeRomaji: (v: string) => void;
+  onChangeEnglish: (v: string) => void;
+
   onAdd: () => void;
   loading: boolean;
 };
@@ -15,13 +20,15 @@ export default function MissingKeywordItem({
   keyword,
   usedCount,
   hiragana,
-  alphabet,
+  romaji,
+  english,
   onChangeHiragana,
-  onChangeAlphabet,
+  onChangeRomaji,
+  onChangeEnglish,
   onAdd,
   loading,
 }: Props) {
-  const canSubmit = hiragana.trim() && alphabet.trim();
+  const canSubmit = hiragana.trim() && romaji.trim();
 
   return (
     <div className="border rounded-md p-4 space-y-2">
@@ -29,21 +36,29 @@ export default function MissingKeywordItem({
         {keyword}（{usedCount}）
       </div>
 
-      <div className="flex gap-2 items-center">
+      <div className="flex gap-2 items-center flex-wrap">
         <input
           type="text"
           placeholder="ひらがな（必須）"
           value={hiragana}
           onChange={(e) => onChangeHiragana(e.target.value)}
-          className="border px-2 py-1 rounded w-1/3"
+          className="border px-2 py-1 rounded w-[220px]"
         />
 
         <input
           type="text"
           placeholder="ローマ字（必須）"
-          value={alphabet}
-          onChange={(e) => onChangeAlphabet(e.target.value)}
-          className="border px-2 py-1 rounded w-1/3"
+          value={romaji}
+          onChange={(e) => onChangeRomaji(e.target.value)}
+          className="border px-2 py-1 rounded w-[220px]"
+        />
+
+        <input
+          type="text"
+          placeholder="英語（任意）"
+          value={english}
+          onChange={(e) => onChangeEnglish(e.target.value)}
+          className="border px-2 py-1 rounded w-[220px]"
         />
 
         <button

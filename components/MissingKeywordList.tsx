@@ -9,29 +9,33 @@ type Missing = {
 
 type Props = {
   items: Missing[];
+
   hiraganaMap: Record<string, string>;
-  alphabetMap: Record<string, string>;
+  romajiMap: Record<string, string>;
+  englishMap: Record<string, string>;
+
   loadingKey: string | null;
+
   onChangeHiragana: (key: string, value: string) => void;
-  onChangeAlphabet: (key: string, value: string) => void;
+  onChangeRomaji: (key: string, value: string) => void;
+  onChangeEnglish: (key: string, value: string) => void;
+
   onAdd: (key: string) => void;
 };
 
 export default function MissingKeywordList({
   items,
   hiraganaMap,
-  alphabetMap,
+  romajiMap,
+  englishMap,
   loadingKey,
   onChangeHiragana,
-  onChangeAlphabet,
+  onChangeRomaji,
+  onChangeEnglish,
   onAdd,
 }: Props) {
   if (items.length === 0) {
-    return (
-      <p className="text-sm text-neutral-500">
-        未登録キーワードはありません
-      </p>
-    );
+    return <p className="text-sm text-neutral-500">未登録キーワードはありません</p>;
   }
 
   return (
@@ -42,14 +46,12 @@ export default function MissingKeywordList({
           keyword={keyword}
           usedCount={used_count}
           hiragana={hiraganaMap[keyword] || ""}
-          alphabet={alphabetMap[keyword] || ""}
+          romaji={romajiMap[keyword] || ""}
+          english={englishMap[keyword] || ""}
           loading={loadingKey === keyword}
-          onChangeHiragana={(v) =>
-            onChangeHiragana(keyword, v)
-          }
-          onChangeAlphabet={(v) =>
-            onChangeAlphabet(keyword, v)
-          }
+          onChangeHiragana={(v) => onChangeHiragana(keyword, v)}
+          onChangeRomaji={(v) => onChangeRomaji(keyword, v)}
+          onChangeEnglish={(v) => onChangeEnglish(keyword, v)}
           onAdd={() => onAdd(keyword)}
         />
       ))}

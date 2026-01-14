@@ -11,23 +11,24 @@ type Missing = {
 export default function DictionaryMissingSection() {
   const [items, setItems] = useState<Missing[]>([]);
   const [hiraganaMap, setHiraganaMap] = useState<Record<string, string>>({});
-  const [alphabetMap, setAlphabetMap] = useState<Record<string, string>>({});
+  const [romajiMap, setRomajiMap] = useState<Record<string, string>>({});
+  const [englishMap, setEnglishMap] = useState<Record<string, string>>({});
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
-  // 初期ロード
   useEffect(() => {
     fetch("/api/keywords/diff")
-      .then(res => res.json())
-      .then(data => {
+      .then((res) => res.json())
+      .then((data) => {
         setItems(data.missing || []);
       });
   }, []);
 
   const addDictionary = async (keyword: string) => {
     const inputHiragana = hiraganaMap[keyword];
-    const inputAlphabet = alphabetMap[keyword];
+    const inputRomaji = romajiMap[keyword];
+    const inputEnglish = englishMap[keyword] ?? "";
 
-    if (!inputHiragana || !inputAlphabet) return;
+    if (!inputHiragana || !inputRomaji) return;
 
     setLoadingKey(keyword);
 
@@ -37,31 +38,28 @@ export default function DictionaryMissingSection() {
       body: JSON.stringify({
         answer: keyword,
         inputHiragana,
-        inputAlphabet,
+        inputRomaji,
+        inputEnglish: inputEnglish.trim() ? inputEnglish : null, // 空ならnullでOK
       }),
     });
 
-    setItems(prev => prev.filter(i => i.keyword !== keyword));
+    setItems((prev) => prev.filter((i) => i.keyword !== keyword));
     setLoadingKey(null);
   };
 
   return (
     <section>
-      <h2 className="text-lg font-semibold mb-4">
-        ⚠ 未登録キーワード（映像には存在）
-      </h2>
+      <h2 className="text-lg font-semibold mb-4">⚠ 未登録キーワード（映像には存在）</h2>
 
       <MissingKeywordList
         items={items}
         hiraganaMap={hiraganaMap}
-        alphabetMap={alphabetMap}
+        romajiMap={romajiMap}
+        englishMap={englishMap}
         loadingKey={loadingKey}
-        onChangeHiragana={(k, v) =>
-          setHiraganaMap({ ...hiraganaMap, [k]: v })
-        }
-        onChangeAlphabet={(k, v) =>
-          setAlphabetMap({ ...alphabetMap, [k]: v })
-        }
+        onChangeHiragana={(k, v) => setHiraganaMap({ ...hiraganaMap, [k]: v })}
+        onChangeRomaji={(k, v) => setRomajiMap({ ...romajiMap, [k]: v })}
+        onChangeEnglish={(k, v) => setEnglishMap({ ...englishMap, [k]: v })}
         onAdd={addDictionary}
       />
     </section>
