@@ -69,9 +69,9 @@ export default function Home() {
             onChange={(e) => setService(e.target.value as 'supabase' | 'stripe' | 'both')}
             className="w-full bg-gray-900 text-white px-4 py-2 rounded-lg border border-gray-700 focus:outline-none"
           >
+            <option value="both">Supabase & Stripe</option>
             <option value="supabase">Supabase のみ</option>
             <option value="stripe">Stripe のみ</option>
-            <option value="both">Supabase & Stripe</option>
           </select>
         </div>
 
