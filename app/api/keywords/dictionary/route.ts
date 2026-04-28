@@ -4,8 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_URL_LIVE!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY_LIVE!
 );
 
 // ✅ 追加（POST）: answer + hiragana + romaji は必須、englishは任意
