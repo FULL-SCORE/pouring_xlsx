@@ -18,24 +18,32 @@ type StripeProduct = {
 export default function StripeProductsPage() {
   const [targetEnv, setTargetEnv] = useState<TargetEnv>('test');
   const [products, setProducts] = useState<StripeProduct[]>([]);
-  const [searchText, setSearchText] = useState('');
+  const [nameSearch, setNameSearch] = useState('');
+  const [productIdSearch, setProductIdSearch] = useState('');
+  const [vidSearch, setVidSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
   const filteredProducts = useMemo(() => {
-    const keyword = searchText.trim().toLowerCase();
-
-    if (!keyword) return products;
+    const nameKeyword = nameSearch.trim().toLowerCase();
+    const productIdKeyword = productIdSearch.trim().toLowerCase();
+    const vidKeyword = vidSearch.trim().toLowerCase();
 
     return products.filter((product) => {
-      return (
-        product.name?.toLowerCase().includes(keyword) ||
-        product.product_id?.toLowerCase().includes(keyword) ||
-        product.meta_vid?.toLowerCase().includes(keyword)
-      );
+      const matchName =
+        !nameKeyword || product.name?.toLowerCase().includes(nameKeyword);
+
+      const matchProductId =
+        !productIdKeyword ||
+        product.product_id?.toLowerCase().includes(productIdKeyword);
+
+      const matchVid =
+        !vidKeyword || product.meta_vid?.toLowerCase().includes(vidKeyword);
+
+      return matchName && matchProductId && matchVid;
     });
-  }, [products, searchText]);
+  }, [products, nameSearch, productIdSearch, vidSearch]);
 
   const fetchProducts = async () => {
     setLoading(true);
@@ -102,6 +110,12 @@ export default function StripeProductsPage() {
     }
   };
 
+  const clearSearch = () => {
+    setNameSearch('');
+    setProductIdSearch('');
+    setVidSearch('');
+  };
+
   useEffect(() => {
     fetchProducts();
   }, [targetEnv]);
@@ -112,7 +126,7 @@ export default function StripeProductsPage() {
         <div>
           <h1 className="text-3xl font-bold">Stripe商品 管理</h1>
           <p className="text-gray-400 mt-2">
-            商品名・product_id・vidで検索し、Stripe商品とSupabaseのactiveを切り替えます。
+            商品名・product_id・vidを個別に検索し、Stripe商品とSupabaseのactiveを切り替えます。
           </p>
         </div>
 
@@ -140,36 +154,53 @@ export default function StripeProductsPage() {
             >
               {loading ? '読み込み中...' : '再読み込み'}
             </button>
+
+            <button
+              onClick={clearSearch}
+              className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600"
+            >
+              検索クリア
+            </button>
           </div>
 
-          <div>
-            <label className="block font-semibold mb-2">
-              商品名 / product_id / vid 検索
-            </label>
-
-            <div className="flex gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block font-semibold mb-2">商品名で検索</label>
               <input
                 type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder="例: 富士山 / prod_xxx / 1222005202001"
+                value={nameSearch}
+                onChange={(e) => setNameSearch(e.target.value)}
+                placeholder="例: 富士山"
                 className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
               />
-
-              {searchText && (
-                <button
-                  onClick={() => setSearchText('')}
-                  className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 whitespace-nowrap"
-                >
-                  クリア
-                </button>
-              )}
             </div>
 
-            <p className="text-sm text-gray-400 mt-2">
-              表示件数: {filteredProducts.length} / {products.length}
-            </p>
+            <div>
+              <label className="block font-semibold mb-2">product_idで検索</label>
+              <input
+                type="text"
+                value={productIdSearch}
+                onChange={(e) => setProductIdSearch(e.target.value)}
+                placeholder="例: prod_xxx"
+                className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block font-semibold mb-2">vidで検索</label>
+              <input
+                type="text"
+                value={vidSearch}
+                onChange={(e) => setVidSearch(e.target.value)}
+                placeholder="例: 1222005202001"
+                className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+            </div>
           </div>
+
+          <p className="text-sm text-gray-400">
+            表示件数: {filteredProducts.length} / {products.length}
+          </p>
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
