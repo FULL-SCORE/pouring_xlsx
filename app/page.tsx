@@ -22,6 +22,13 @@ export default function Home() {
           >
             キーワードチェック画面へ
           </Link>
+
+          <Link
+            href="/archive"
+            className="block w-full text-center bg-blue-600 hover:bg-blue-700 transition rounded-lg py-4 font-bold"
+          >
+            アーカイブ制御画面へ
+          </Link>
         </div>
       </div>
     </main>

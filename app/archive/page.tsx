@@ -26,7 +26,7 @@ export default function StripeProductsPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`/api/stripe-products?targetEnv=${targetEnv}`);
+      const res = await fetch(`/api/archive?targetEnv=${targetEnv}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -53,7 +53,7 @@ export default function StripeProductsPage() {
     setUpdatingId(product.product_id);
 
     try {
-      const res = await fetch('/api/stripe-products/toggle', {
+      const res = await fetch('/api/archive/toggle', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
