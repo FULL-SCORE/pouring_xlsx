@@ -9,10 +9,6 @@ const schema = z.object({
   targetEnv: z.enum(['test', 'live']),
 });
 
-// =========================
-// 解像度ソート
-// =========================
-
 function sortResolutionByLabelPriority(
   resolution: Record<string, string>
 ): Record<string, string> {
@@ -24,10 +20,6 @@ function sortResolutionByLabelPriority(
     )
   );
 }
-
-// =========================
-// JSON安全パース
-// =========================
 
 function parseJsonValue(value: unknown): Record<string, unknown> {
   if (typeof value === 'string') {
@@ -45,17 +37,9 @@ function parseJsonValue(value: unknown): Record<string, unknown> {
   return {};
 }
 
-// =========================
-// 空文字 → null
-// =========================
-
 function emptyToNull(value: unknown) {
   return value === '' || value === undefined ? null : value;
 }
-
-// =========================
-// boolean変換
-// =========================
 
 function toBoolean(value: unknown) {
   return (
@@ -67,11 +51,7 @@ function toBoolean(value: unknown) {
   );
 }
 
-// =========================
-// stripe_products用整形
-// =========================
-
-function createStripeProductData(row: Record<string, any>) {
+function createStripeProductDataFromCsv(row: Record<string, any>) {
   return {
     id: emptyToNull(row.id),
     product_id: emptyToNull(row.product_id),
@@ -87,15 +67,31 @@ function createStripeProductData(row: Record<string, any>) {
   };
 }
 
+function createStripeProductDataFromStripe(params: {
+  product: Stripe.Product;
+  vid: unknown;
+  cut: unknown;
+  footageServer: unknown;
+}) {
+  const { product, vid, cut, footageServer } = params;
+
+  return {
+    product_id: product.id,
+    name: product.name,
+    metadata: product.metadata ?? {},
+    footage_server: emptyToNull(footageServer),
+    created: new Date(product.created * 1000).toISOString(),
+    active: product.active,
+    cut: emptyToNull(cut),
+    day: new Date().toISOString().slice(0, 10),
+    meta_vid: emptyToNull(String(vid)),
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-
     const { json, service, targetEnv } = schema.parse(body);
-
-    // =========================
-    // 環境切替
-    // =========================
 
     const supabaseUrl =
       targetEnv === 'live'
@@ -120,10 +116,6 @@ export async function POST(req: Request) {
 
     const supabaseLogs: string[] = [];
     const stripeLogs: string[] = [];
-
-    // =========================
-    // メイン処理
-    // =========================
 
     for (const row of json) {
       const {
@@ -160,41 +152,37 @@ export async function POST(req: Request) {
         '4K_price': price_4K,
       } = row;
 
-      // =========================================
-      // stripe_products テーブル登録
-      // product_id があるなら登録
-      // =========================================
+      // =========================
+      // stripe_products CSV直接登録用
+      // product_id がCSV内にある場合
+      // =========================
 
       if (row.product_id && service !== 'stripe') {
-        const stripeProductData = createStripeProductData(row);
+        const stripeProductData = createStripeProductDataFromCsv(row);
 
-        const { error: stripeProductsError } = await supabase
+        const { error } = await supabase
           .from('stripe_products')
           .upsert(stripeProductData, {
             onConflict: 'product_id',
           });
 
-        if (stripeProductsError) {
+        if (error) {
           supabaseLogs.push(
-            `${row.product_id} stripe_products 失敗: ${stripeProductsError.message}`
+            `${row.product_id} stripe_products CSV登録失敗: ${error.message}`
           );
         } else {
-          supabaseLogs.push(`${row.product_id} stripe_products 成功`);
+          supabaseLogs.push(`${row.product_id} stripe_products CSV登録成功`);
         }
       }
-
-      // =========================================
-      // vid無しはここでスキップ
-      // =========================================
 
       if (!vid) {
         supabaseLogs.push('vidなしスキップ');
         continue;
       }
 
-      // =========================================
-      // Supabase
-      // =========================================
+      // =========================
+      // Supabase: video_info / download_vid
+      // =========================
 
       if (service !== 'stripe') {
         const resolutionObj = parseJsonValue(
@@ -224,23 +212,17 @@ export async function POST(req: Request) {
 
         const downloadVidData = {
           vid,
-
           EX_ID: emptyToNull(EX_ID),
           '12K_ID': emptyToNull(ID_12K),
           '8K_ID': emptyToNull(ID_8K),
           '6K_ID': emptyToNull(ID_6K),
           '4K_ID': emptyToNull(ID_4K),
-
           EX_size: emptyToNull(EX_size),
           '12K_size': emptyToNull(size_12K),
           '8K_size': emptyToNull(size_8K),
           '6K_size': emptyToNull(size_6K),
           '4K_size': emptyToNull(size_4K),
         };
-
-        // =========================
-        // video_info
-        // =========================
 
         const { error: videoInfoError } = await supabase
           .from('video_info')
@@ -255,10 +237,6 @@ export async function POST(req: Request) {
         } else {
           supabaseLogs.push(`${vid} video_info 成功`);
         }
-
-        // =========================
-        // download_vid
-        // =========================
 
         const { error: downloadVidError } = await supabase
           .from('download_vid')
@@ -275,14 +253,18 @@ export async function POST(req: Request) {
         }
       }
 
-      // =========================================
-      // Stripe
-      // =========================================
+      // =========================
+      // Stripe 商品・価格作成
+      // 作成/更新後に stripe_products へ保存
+      // =========================
 
       if (service !== 'supabase') {
-        const formattedTitle = `${title
+        const safeTitle = title ? String(title) : '';
+        const safeCut = cut ? String(cut) : '';
+
+        const formattedTitle = `${safeTitle
           .replace(/\(.*?\)/g, '')
-          .trim()}${cut}_${vid}`;
+          .trim()}${safeCut}_${vid}`;
 
         const vidStr = String(vid);
 
@@ -290,12 +272,7 @@ export async function POST(req: Request) {
 
         if (vidStr.length >= 12) {
           const folderRaw = vidStr.slice(4, 10);
-
-          const folder = `${folderRaw.slice(
-            0,
-            4
-          )}_${folderRaw.slice(4, 6)}`;
-
+          const folder = `${folderRaw.slice(0, 4)}_${folderRaw.slice(4, 6)}`;
           imageUrl = `https://expix-ft.jp/ex/footage/${folder}/720/${vidStr}.jpg`;
         }
 
@@ -307,42 +284,28 @@ export async function POST(req: Request) {
           (p) => p.metadata?.vid === vidStr
         );
 
-        let product;
-
-        // =========================
-        // 商品更新
-        // =========================
+        let product: Stripe.Product;
 
         if (existingProduct) {
           product = await stripe.products.update(existingProduct.id, {
             name: formattedTitle,
-
             images: imageUrl ? [imageUrl] : undefined,
-
             metadata: {
-              vid,
+              vid: vidStr,
               day: new Date().toISOString().slice(0, 10),
-              cut: String(cut),
+              cut: safeCut,
             },
           });
 
           stripeLogs.push(`${formattedTitle} 商品更新`);
-        }
-
-        // =========================
-        // 商品作成
-        // =========================
-
-        else {
+        } else {
           product = await stripe.products.create({
             name: formattedTitle,
-
             images: imageUrl ? [imageUrl] : undefined,
-
             metadata: {
-              vid,
+              vid: vidStr,
               day: new Date().toISOString().slice(0, 10),
-              cut: String(cut),
+              cut: safeCut,
             },
           });
 
@@ -350,8 +313,30 @@ export async function POST(req: Request) {
         }
 
         // =========================
-        // Price一覧取得
+        // ここが重要：
+        // Stripe作成/更新後の product.id を stripe_products に保存
         // =========================
+
+        const stripeProductSupabaseData = createStripeProductDataFromStripe({
+          product,
+          vid,
+          cut,
+          footageServer,
+        });
+
+        const { error: stripeProductError } = await supabase
+          .from('stripe_products')
+          .upsert(stripeProductSupabaseData, {
+            onConflict: 'product_id',
+          });
+
+        if (stripeProductError) {
+          supabaseLogs.push(
+            `${formattedTitle} stripe_products 失敗: ${stripeProductError.message}`
+          );
+        } else {
+          supabaseLogs.push(`${formattedTitle} stripe_products 成功`);
+        }
 
         const allPrices = await stripe.prices
           .list({
@@ -359,10 +344,6 @@ export async function POST(req: Request) {
             limit: 100,
           })
           .autoPagingToArray({ limit: 1000 });
-
-        // =========================
-        // Price登録
-        // =========================
 
         for (const { amount, quality } of [
           { amount: EX_price, quality: 'EX' },
@@ -373,7 +354,12 @@ export async function POST(req: Request) {
         ]) {
           if (!amount) continue;
 
-          const unitAmount = parseInt(amount, 10);
+          const unitAmount = parseInt(String(amount), 10);
+
+          if (Number.isNaN(unitAmount)) {
+            stripeLogs.push(`${formattedTitle} ${quality} 価格不正のためスキップ`);
+            continue;
+          }
 
           const alreadyExists = allPrices.some(
             (p) =>
@@ -383,9 +369,7 @@ export async function POST(req: Request) {
           );
 
           if (alreadyExists) {
-            stripeLogs.push(
-              `${formattedTitle} ${quality} スキップ`
-            );
+            stripeLogs.push(`${formattedTitle} ${quality} スキップ`);
             continue;
           }
 
@@ -396,9 +380,7 @@ export async function POST(req: Request) {
             nickname: quality,
           });
 
-          stripeLogs.push(
-            `${formattedTitle} ${quality} 価格作成`
-          );
+          stripeLogs.push(`${formattedTitle} ${quality} 価格作成`);
         }
       }
     }
