@@ -39,9 +39,37 @@ function parseJsonValue(value: unknown): Record<string, unknown> {
   return {};
 }
 
-// ★今回の重要ポイント
+// 空文字をnullへ
 function emptyToNull(value: unknown) {
   return value === '' || value === undefined ? null : value;
+}
+
+// boolean変換
+function toBoolean(value: unknown) {
+  return (
+    value === true ||
+    value === 'true' ||
+    value === 'TRUE' ||
+    value === '1' ||
+    value === 1
+  );
+}
+
+// stripe_products用データ整形
+function createStripeProductData(row: Record<string, any>) {
+  return {
+    id: emptyToNull(row.id),
+    product_id: emptyToNull(row.product_id),
+    created_at: emptyToNull(row.created_at),
+    name: emptyToNull(row.name),
+    metadata: parseJsonValue(row.metadata),
+    footage_server: emptyToNull(row.footage_server),
+    created: emptyToNull(row.created),
+    active: toBoolean(row.active),
+    cut: emptyToNull(row.cut),
+    day: emptyToNull(row.day),
+    meta_vid: emptyToNull(row.meta_vid),
+  };
 }
 
 export async function POST(req: Request) {
@@ -113,6 +141,33 @@ export async function POST(req: Request) {
         '4K_price': price_4K,
       } = row;
 
+      // =========================
+      // stripe_products CSV用処理
+      // vidが無く、product_idがあるCSVはこちらで処理
+      // =========================
+
+      if (!vid && row.product_id) {
+        if (service !== 'stripe') {
+          const stripeProductData = createStripeProductData(row);
+
+          const { error: stripeProductsError } = await supabase
+            .from('stripe_products')
+            .upsert(stripeProductData, {
+              onConflict: 'product_id',
+            });
+
+          if (stripeProductsError) {
+            supabaseLogs.push(
+              `${row.product_id} stripe_products 失敗: ${stripeProductsError.message}`
+            );
+          } else {
+            supabaseLogs.push(`${row.product_id} stripe_products 成功`);
+          }
+        }
+
+        continue;
+      }
+
       if (!vid) {
         supabaseLogs.push('vidなしスキップ');
         continue;
@@ -143,7 +198,6 @@ export async function POST(req: Request) {
           push,
         };
 
-        // ★ここが修正ポイント
         const downloadVidData = {
           vid,
           EX_ID: emptyToNull(EX_ID),
