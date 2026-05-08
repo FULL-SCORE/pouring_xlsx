@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 type TargetEnv = 'test' | 'live';
 
@@ -18,15 +18,30 @@ type StripeProduct = {
 export default function StripeProductsPage() {
   const [targetEnv, setTargetEnv] = useState<TargetEnv>('test');
   const [products, setProducts] = useState<StripeProduct[]>([]);
+  const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+
+  const filteredProducts = useMemo(() => {
+    const keyword = searchText.trim().toLowerCase();
+
+    if (!keyword) return products;
+
+    return products.filter((product) => {
+      return (
+        product.name?.toLowerCase().includes(keyword) ||
+        product.product_id?.toLowerCase().includes(keyword) ||
+        product.meta_vid?.toLowerCase().includes(keyword)
+      );
+    });
+  }, [products, searchText]);
 
   const fetchProducts = async () => {
     setLoading(true);
 
     try {
-      const res = await fetch(`/api/archive?targetEnv=${targetEnv}`);
+      const res = await fetch(`/api/stripe-products?targetEnv=${targetEnv}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -53,7 +68,7 @@ export default function StripeProductsPage() {
     setUpdatingId(product.product_id);
 
     try {
-      const res = await fetch('/api/archive/toggle', {
+      const res = await fetch('/api/stripe-products/toggle', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -97,33 +112,64 @@ export default function StripeProductsPage() {
         <div>
           <h1 className="text-3xl font-bold">Stripe商品 管理</h1>
           <p className="text-gray-400 mt-2">
-            Supabaseのstripe_products.activeとStripeの商品有効状態を同時に切り替えます。
+            商品名・product_id・vidで検索し、Stripe商品とSupabaseのactiveを切り替えます。
           </p>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 flex items-center gap-4">
-          <label className="font-semibold">対象環境</label>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="font-semibold">対象環境</label>
 
-          <select
-            value={targetEnv}
-            onChange={(e) => setTargetEnv(e.target.value as TargetEnv)}
-            className={`px-4 py-2 rounded-lg border ${
-              targetEnv === 'live'
-                ? 'bg-red-950 border-red-500 text-red-100'
-                : 'bg-gray-800 border-gray-700 text-white'
-            }`}
-          >
-            <option value="test">テスト環境</option>
-            <option value="live">本番環境</option>
-          </select>
+            <select
+              value={targetEnv}
+              onChange={(e) => setTargetEnv(e.target.value as TargetEnv)}
+              className={`px-4 py-2 rounded-lg border ${
+                targetEnv === 'live'
+                  ? 'bg-red-950 border-red-500 text-red-100'
+                  : 'bg-gray-800 border-gray-700 text-white'
+              }`}
+            >
+              <option value="test">テスト環境</option>
+              <option value="live">本番環境</option>
+            </select>
 
-          <button
-            onClick={fetchProducts}
-            disabled={loading}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600"
-          >
-            {loading ? '読み込み中...' : '再読み込み'}
-          </button>
+            <button
+              onClick={fetchProducts}
+              disabled={loading}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600"
+            >
+              {loading ? '読み込み中...' : '再読み込み'}
+            </button>
+          </div>
+
+          <div>
+            <label className="block font-semibold mb-2">
+              商品名 / product_id / vid 検索
+            </label>
+
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="例: 富士山 / prod_xxx / 1222005202001"
+                className="w-full px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+
+              {searchText && (
+                <button
+                  onClick={() => setSearchText('')}
+                  className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 whitespace-nowrap"
+                >
+                  クリア
+                </button>
+              )}
+            </div>
+
+            <p className="text-sm text-gray-400 mt-2">
+              表示件数: {filteredProducts.length} / {products.length}
+            </p>
+          </div>
         </div>
 
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -139,7 +185,7 @@ export default function StripeProductsPage() {
             </thead>
 
             <tbody>
-              {products.map((product) => (
+              {filteredProducts.map((product) => (
                 <tr
                   key={product.product_id}
                   className="border-t border-gray-800"
@@ -178,10 +224,18 @@ export default function StripeProductsPage() {
                 </tr>
               ))}
 
-              {products.length === 0 && !loading && (
+              {filteredProducts.length === 0 && !loading && (
                 <tr>
                   <td colSpan={5} className="p-6 text-center text-gray-400">
-                    商品がありません。
+                    該当する商品がありません。
+                  </td>
+                </tr>
+              )}
+
+              {loading && (
+                <tr>
+                  <td colSpan={5} className="p-6 text-center text-gray-400">
+                    読み込み中...
                   </td>
                 </tr>
               )}
