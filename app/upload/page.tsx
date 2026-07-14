@@ -18,16 +18,23 @@ export default function Home() {
   const [service, setService] = useState<Service>('both');
   const [targetEnv, setTargetEnv] = useState<TargetEnv>('test');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+
   const [isUploading, setIsUploading] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+
   const [currentFileName, setCurrentFileName] = useState<string>('');
+
   const [progress, setProgress] = useState({
     current: 0,
     total: 0,
   });
+
   const [alert, setAlert] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
+
+  const isProcessing = isUploading || isResetting;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -65,7 +72,9 @@ export default function Home() {
     });
   };
 
-  const parseFileToJson = async (file: File): Promise<Record<string, unknown>[]> => {
+  const parseFileToJson = async (
+    file: File
+  ): Promise<Record<string, unknown>[]> => {
     const buffer = await readFileAsArrayBuffer(file);
     const data = new Uint8Array(buffer);
 
@@ -123,10 +132,11 @@ export default function Home() {
         const text = await response.text();
 
         throw new Error(
-          `APIからJSON以外のレスポンスが返りました。認証ページやHTMLが返っている可能性があります。先頭: ${text.slice(
-            0,
-            100
-          )}`
+          `APIからJSON以外のレスポンスが返りました。` +
+            `認証ページやHTMLが返っている可能性があります。先頭: ${text.slice(
+              0,
+              100
+            )}`
         );
       }
 
@@ -134,7 +144,9 @@ export default function Home() {
 
       if (!response.ok) {
         throw new Error(
-          result?.error || result?.message || 'APIエラーが発生しました。'
+          result?.error ||
+            result?.message ||
+            'APIエラーが発生しました。'
         );
       }
 
@@ -156,7 +168,10 @@ export default function Home() {
         fileName: file.name,
         status: 'error',
         logs: [],
-        error: (error as Error).message,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'アップロードに失敗しました。',
       };
     }
   };
@@ -172,7 +187,9 @@ export default function Home() {
 
     if (targetEnv === 'live') {
       const confirmed = window.confirm(
-        `本番環境に ${selectedFiles.length} 件のファイルをアップロードします。\n本当に実行しますか？`
+        `本番環境に${selectedFiles.length}件のファイルをアップロードします。\n\n` +
+          'Stripe商品がアーカイブされている場合は、アーカイブ解除されます。\n' +
+          '本当に実行しますか？'
       );
 
       if (!confirmed) {
@@ -183,6 +200,8 @@ export default function Home() {
     setIsUploading(true);
     setAlert(null);
     setLogs([]);
+    setCurrentFileName('');
+
     setProgress({
       current: 0,
       total: selectedFiles.length,
@@ -190,62 +209,182 @@ export default function Home() {
 
     const results: UploadLog[] = [];
 
-    for (let i = 0; i < selectedFiles.length; i++) {
-      const file = selectedFiles[i];
+    try {
+      for (let i = 0; i < selectedFiles.length; i++) {
+        const file = selectedFiles[i];
 
-      setCurrentFileName(file.name);
-      setProgress({
-        current: i + 1,
-        total: selectedFiles.length,
-      });
+        setCurrentFileName(file.name);
 
-      const result = await uploadOneFile(file);
-      results.push(result);
+        setProgress({
+          current: i + 1,
+          total: selectedFiles.length,
+        });
 
-      setLogs([...results]);
+        const result = await uploadOneFile(file);
+
+        results.push(result);
+        setLogs([...results]);
+      }
+
+      const successCount = results.filter(
+        (item) => item.status === 'success'
+      ).length;
+
+      const errorCount = results.filter(
+        (item) => item.status === 'error'
+      ).length;
+
+      if (errorCount > 0) {
+        setAlert({
+          type: 'error',
+          message: `${successCount}件成功、${errorCount}件失敗しました。ログを確認してください。`,
+        });
+      } else {
+        setAlert({
+          type: 'success',
+          message:
+            targetEnv === 'live'
+              ? `${successCount}件の本番環境へのアップロードが完了しました。`
+              : `${successCount}件のテスト環境へのアップロードが完了しました。`,
+        });
+      }
+    } finally {
+      setCurrentFileName('');
+      setIsUploading(false);
+    }
+  };
+
+  const handleResetProducts = async () => {
+    const environmentName =
+      targetEnv === 'live' ? '本番環境' : 'テスト環境';
+
+    const requiredConfirmation =
+      targetEnv === 'live'
+        ? '本番商品をリセット'
+        : 'テスト商品をリセット';
+
+    const input = window.prompt(
+      `${environmentName}の商品をリセットします。\n\n` +
+        '処理内容:\n' +
+        '1. Stripeの有効な全商品をアーカイブ\n' +
+        '2. Supabaseのstripe_productsを全削除\n\n' +
+        'video_infoとdownload_vidは削除しません。\n\n' +
+        `実行するには「${requiredConfirmation}」と入力してください。`
+    );
+
+    if (input === null) {
+      return;
     }
 
-    const successCount = results.filter((item) => item.status === 'success').length;
-    const errorCount = results.filter((item) => item.status === 'error').length;
-
-    if (errorCount > 0) {
+    if (input !== requiredConfirmation) {
       setAlert({
         type: 'error',
-        message: `${successCount}件成功、${errorCount}件失敗しました。ログを確認してください。`,
+        message: '確認文字列が一致しません。',
       });
-    } else {
-      setAlert({
-        type: 'success',
-        message:
-          targetEnv === 'live'
-            ? `${successCount}件の本番環境へのアップロードが完了しました。`
-            : `${successCount}件のテスト環境へのアップロードが完了しました。`,
-      });
+      return;
     }
 
-    setCurrentFileName('');
-    setIsUploading(false);
+    const confirmed = window.confirm(
+      `${environmentName}の商品を本当にリセットしますか？\n\n` +
+        'リセット後、対象の商品ファイルをサービス選択「Supabase & Stripe」で再アップロードしてください。'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsResetting(true);
+    setAlert(null);
+    setLogs([]);
+
+    try {
+      const response = await fetch('/api/archive/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          targetEnv,
+          confirmation: requiredConfirmation,
+        }),
+      });
+
+      const contentType = response.headers.get('content-type') || '';
+
+      if (!contentType.includes('application/json')) {
+        const text = await response.text();
+
+        throw new Error(
+          `APIからJSON以外のレスポンスが返りました。先頭: ${text.slice(
+            0,
+            100
+          )}`
+        );
+      }
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        const failedDetails = Array.isArray(result.failedProducts)
+          ? result.failedProducts
+              .map(
+                (item: {
+                  productId: string;
+                  name: string;
+                  error: string;
+                }) =>
+                  `${item.name}（${item.productId}）: ${item.error}`
+              )
+              .join('\n')
+          : '';
+
+        throw new Error(
+          `${result.error || '商品リセットに失敗しました。'}${
+            failedDetails ? `\n${failedDetails}` : ''
+          }`
+        );
+      }
+
+      setAlert({
+        type: 'success',
+        message: result.message,
+      });
+    } catch (error) {
+      setAlert({
+        type: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : '商品リセットに失敗しました。',
+      });
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white font-sans flex items-center justify-center px-4 py-10">
+    <main className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black px-4 py-10 font-sans text-white">
       <div className="w-full">
-        <h1 className="text-4xl font-extrabold text-center mb-10">
+        <h1 className="mb-10 text-center text-4xl font-extrabold">
           データアップローダー
         </h1>
 
-        <div className="max-w-3xl mx-auto space-y-6 bg-gray-800/60 p-6 rounded-2xl shadow-xl">
+        <div className="mx-auto max-w-3xl space-y-6 rounded-2xl bg-gray-800/60 p-6 shadow-xl">
           <div>
-            <label className="block font-semibold mb-2">対象環境:</label>
+            <label className="mb-2 block font-semibold">
+              対象環境:
+            </label>
 
             <select
               value={targetEnv}
-              onChange={(e) => setTargetEnv(e.target.value as TargetEnv)}
-              disabled={isUploading}
-              className={`w-full px-4 py-2 rounded-lg border focus:outline-none disabled:opacity-60 ${
+              onChange={(e) =>
+                setTargetEnv(e.target.value as TargetEnv)
+              }
+              disabled={isProcessing}
+              className={`w-full rounded-lg border px-4 py-2 focus:outline-none disabled:opacity-60 ${
                 targetEnv === 'live'
-                  ? 'bg-red-950 text-red-100 border-red-500'
-                  : 'bg-gray-900 text-white border-gray-700'
+                  ? 'border-red-500 bg-red-950 text-red-100'
+                  : 'border-gray-700 bg-gray-900 text-white'
               }`}
             >
               <option value="test">テスト環境</option>
@@ -253,20 +392,24 @@ export default function Home() {
             </select>
 
             {targetEnv === 'live' && (
-              <p className="mt-2 text-sm text-red-300 font-semibold">
-                注意：本番のSupabaseとStripeに登録・更新されます。
+              <p className="mt-2 text-sm font-semibold text-red-300">
+                注意：本番のSupabaseとStripeが変更されます。
               </p>
             )}
           </div>
 
           <div>
-            <label className="block font-semibold mb-2">サービス選択:</label>
+            <label className="mb-2 block font-semibold">
+              サービス選択:
+            </label>
 
             <select
               value={service}
-              onChange={(e) => setService(e.target.value as Service)}
-              disabled={isUploading}
-              className="w-full bg-gray-900 text-white px-4 py-2 rounded-lg border border-gray-700 focus:outline-none disabled:opacity-60"
+              onChange={(e) =>
+                setService(e.target.value as Service)
+              }
+              disabled={isProcessing}
+              className="w-full rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-white focus:outline-none disabled:opacity-60"
             >
               <option value="both">Supabase & Stripe</option>
               <option value="supabase">Supabase のみ</option>
@@ -275,7 +418,7 @@ export default function Home() {
           </div>
 
           <div>
-            <label className="block font-semibold mb-2">
+            <label className="mb-2 block font-semibold">
               ファイル選択 (.xlsx / .xls / .csv)
             </label>
 
@@ -284,17 +427,17 @@ export default function Home() {
               accept=".xlsx,.xls,.csv"
               multiple
               onChange={handleFileChange}
-              disabled={isUploading}
-              className="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-700 hover:file:bg-blue-800 disabled:opacity-60"
+              disabled={isProcessing}
+              className="block w-full text-sm text-gray-300 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-700 file:px-4 file:py-2 file:text-sm file:font-semibold hover:file:bg-blue-800 disabled:opacity-60"
             />
 
             {selectedFiles.length > 0 && (
-              <div className="mt-3 bg-gray-900/70 border border-gray-700 rounded-lg p-3">
-                <p className="text-sm font-semibold mb-2">
+              <div className="mt-3 rounded-lg border border-gray-700 bg-gray-900/70 p-3">
+                <p className="mb-2 text-sm font-semibold">
                   選択中: {selectedFiles.length}件
                 </p>
 
-                <ul className="space-y-1 text-xs text-gray-300 max-h-32 overflow-y-auto">
+                <ul className="max-h-32 space-y-1 overflow-y-auto text-xs text-gray-300">
                   {selectedFiles.map((file, index) => (
                     <li key={`${file.name}-${index}`}>
                       {index + 1}. {file.name}
@@ -306,9 +449,10 @@ export default function Home() {
           </div>
 
           {isUploading && (
-            <div className="bg-gray-900 border border-gray-700 rounded-lg p-4">
+            <div className="rounded-lg border border-gray-700 bg-gray-900 p-4">
               <p className="text-sm font-semibold">
-                アップロード中: {progress.current} / {progress.total}
+                アップロード中: {progress.current} /{' '}
+                {progress.total}
               </p>
 
               {currentFileName && (
@@ -317,13 +461,15 @@ export default function Home() {
                 </p>
               )}
 
-              <div className="mt-3 h-2 bg-gray-700 rounded-full overflow-hidden">
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-700">
                 <div
                   className="h-full bg-blue-600 transition-all"
                   style={{
                     width:
                       progress.total > 0
-                        ? `${(progress.current / progress.total) * 100}%`
+                        ? `${
+                            (progress.current / progress.total) * 100
+                          }%`
                         : '0%',
                   }}
                 />
@@ -331,11 +477,45 @@ export default function Home() {
             </div>
           )}
 
+          <div className="rounded-xl border border-red-800 bg-red-950/30 p-4">
+            <h2 className="font-bold text-red-300">
+              商品データのリセット
+            </h2>
+
+            <p className="mt-2 text-sm text-gray-300">
+              Stripeの有効な全商品をアーカイブし、Supabaseの
+              stripe_productsを全削除します。
+            </p>
+
+            <p className="mt-2 text-sm text-gray-300">
+              video_infoとdownload_vidは削除しません。
+            </p>
+
+            <p className="mt-2 text-sm font-semibold text-yellow-300">
+              リセット後は、サービス選択を「Supabase &
+              Stripe」にして商品ファイルを再アップロードしてください。
+            </p>
+
+            <button
+              type="button"
+              onClick={handleResetProducts}
+              disabled={isProcessing}
+              className="mt-4 w-full rounded-lg bg-red-700 px-4 py-2 font-bold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-gray-600"
+            >
+              {isResetting
+                ? '商品をリセット中...'
+                : targetEnv === 'live'
+                  ? '本番商品をリセット'
+                  : 'テスト商品をリセット'}
+            </button>
+          </div>
+
           <div>
             <button
+              type="button"
               onClick={handleUpload}
-              disabled={isUploading}
-              className={`w-full text-white font-bold py-2 px-4 rounded-lg transition disabled:bg-gray-600 disabled:cursor-not-allowed ${
+              disabled={isProcessing}
+              className={`w-full rounded-lg px-4 py-2 font-bold text-white transition disabled:cursor-not-allowed disabled:bg-gray-600 ${
                 targetEnv === 'live'
                   ? 'bg-red-600 hover:bg-red-700'
                   : 'bg-blue-600 hover:bg-blue-700'
@@ -351,8 +531,10 @@ export default function Home() {
 
           {alert && (
             <div
-              className={`p-4 rounded-lg text-sm ${
-                alert.type === 'success' ? 'bg-green-600' : 'bg-red-600'
+              className={`whitespace-pre-wrap rounded-lg p-4 text-sm ${
+                alert.type === 'success'
+                  ? 'bg-green-600'
+                  : 'bg-red-600'
               }`}
             >
               {alert.message}
@@ -360,21 +542,25 @@ export default function Home() {
           )}
 
           {logs.length > 0 && (
-            <div className="bg-gray-900 border border-gray-700 rounded-lg p-4 max-h-96 overflow-y-auto">
-              <h2 className="text-lg font-bold mb-3">アップロードログ:</h2>
+            <div className="max-h-96 overflow-y-auto rounded-lg border border-gray-700 bg-gray-900 p-4">
+              <h2 className="mb-3 text-lg font-bold">
+                アップロードログ:
+              </h2>
 
               <div className="space-y-4">
                 {logs.map((item, index) => (
                   <div
                     key={`${item.fileName}-${index}`}
-                    className={`border rounded-lg p-3 ${
+                    className={`rounded-lg border p-3 ${
                       item.status === 'success'
                         ? 'border-green-700 bg-green-950/30'
                         : 'border-red-700 bg-red-950/30'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-4">
-                      <h3 className="font-bold text-sm">{item.fileName}</h3>
+                      <h3 className="text-sm font-bold">
+                        {item.fileName}
+                      </h3>
 
                       <span
                         className={`text-xs font-bold ${
@@ -383,7 +569,9 @@ export default function Home() {
                             : 'text-red-300'
                         }`}
                       >
-                        {item.status === 'success' ? '成功' : '失敗'}
+                        {item.status === 'success'
+                          ? '成功'
+                          : '失敗'}
                       </span>
                     </div>
 
@@ -394,7 +582,7 @@ export default function Home() {
                     )}
 
                     {item.logs.length > 0 && (
-                      <ul className="mt-2 list-disc list-inside space-y-1 text-sm text-gray-300">
+                      <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-gray-300">
                         {item.logs.map((log, logIndex) => (
                           <li key={logIndex}>{log}</li>
                         ))}
